@@ -1,18 +1,23 @@
-import { mockNotes } from '@/lib/mock-notes-store';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { type StoredNote } from '@/lib/structure-types';
 
 interface NoteViewerPageProps {
   params: Promise<{ id: string }>;
 }
 
 export default async function NoteViewerPage({ params }: NoteViewerPageProps) {
-  if (mockNotes.length === 0) {
+  const notesPath = path.join(process.cwd(), 'data', 'notes.json');
+  const notesContent = await fs.readFile(notesPath, 'utf-8');
+  const notes = JSON.parse(notesContent) as StoredNote[];
+
+  if (notes.length === 0) {
     return (
       <main className="min-h-screen bg-background px-4 py-10 sm:px-8">
         <div className="mx-auto max-w-4xl rounded-xl border border-border bg-card p-8 text-center">
-          <p className="text-xs uppercase tracking-wide text-secondary font-semibold">Contribute & Earn</p>
           <h1 className="mt-2 text-3xl font-heading font-bold text-foreground">Coming Soon</h1>
           <p className="mt-3 text-muted-foreground">
-            No notes here yet! Be the first to contribute for your semester and earn PadhnaJaam rewards.
+            The PadhnaJaam Library is coming soon. Want to earn rewards? Contribute your 3rd Sem BBA Finance notes today!
           </p>
         </div>
       </main>
@@ -20,7 +25,7 @@ export default async function NoteViewerPage({ params }: NoteViewerPageProps) {
   }
 
   const { id } = await params;
-  const note = mockNotes.find((item) => item.id === id);
+  const note = notes.find((item) => item.id === id);
 
   if (!note) {
     return (
