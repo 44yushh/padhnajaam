@@ -1,0 +1,10 @@
+{
+  "universities": [
+    {
+      "id": "uni-tu",
+      "name": "Tribhuvan University (TU)",
+      "logoUrl": "",
+      "faculties": []
+    }
+  ]
+}
