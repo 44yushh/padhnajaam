@@ -133,10 +133,10 @@ export default function ContactPage() {
                   </div>
                   <p className="text-sm text-muted-foreground mb-2">For general inquiries:</p>
                   <a
-                    href="mailto:contact@padhnaJaam.com"
+                    href="mailto:aayushhhsahh@gmail.com"
                     className="text-secondary hover:text-secondary/80 font-medium break-all"
                   >
-                    contact@padhnaJaam.com
+                    aayushhhsahh@gmail.com
                   </a>
                 </div>
 

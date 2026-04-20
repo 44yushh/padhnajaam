@@ -1,7 +1,16 @@
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
+import { createSupabaseServerClient } from '@/lib/supabase-server';
 
-export default function PastQuestionsPage() {
+export default async function PastQuestionsPage() {
+  const supabase = createSupabaseServerClient();
+  const { data } = await supabase
+    .from('documents')
+    .select('id, title, file_url, subject, semester, created_at')
+    .eq('category', 'Past Paper')
+    .order('created_at', { ascending: false });
+  const papers = data ?? [];
+
   return (
     <>
       <Navbar />
@@ -21,11 +30,20 @@ export default function PastQuestionsPage() {
 
         <section className="py-12">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-4xl rounded-xl border border-border bg-card p-8 text-center">
-              <h2 className="mt-2 text-3xl font-heading font-bold text-foreground">Coming Soon</h2>
-              <p className="mt-3 text-muted-foreground">
-                The PadhnaJaam Library is coming soon. Want to earn rewards? Contribute your 3rd Sem BBA Finance notes today!
-              </p>
+            <div className="mx-auto max-w-4xl space-y-3">
+              {papers.map((paper) => (
+                <a key={paper.id} href={paper.file_url || '#'} target="_blank" rel="noreferrer" className="block rounded-xl border border-border bg-card p-5 hover:bg-muted/30">
+                  <h2 className="font-semibold">{paper.title}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {paper.subject} · Semester {paper.semester} · {new Date(paper.created_at).toLocaleDateString()}
+                  </p>
+                </a>
+              ))}
+              {papers.length === 0 && (
+                <div className="rounded-xl border border-border bg-card p-8 text-center text-muted-foreground">
+                  No past question papers uploaded yet.
+                </div>
+              )}
             </div>
           </div>
         </section>

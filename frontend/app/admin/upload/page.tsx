@@ -1,174 +1,365 @@
 'use client';
 
 import Link from 'next/link';
-import { type ChangeEvent, type FormEvent, useEffect, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
 import AdminSidebar from '@/components/admin-sidebar';
 import { Button } from '@/components/ui/button';
-import { isAdminLoggedIn, setAdminLoggedIn } from '@/lib/admin-auth';
-import { type StoredNote, type StructureStore } from '@/lib/structure-types';
+import { supabase } from '@/lib/supabase';
+import { isAllowedAdminEmail } from '@/lib/admin-allowlist';
+
+interface StructureRow {
+  id: string;
+  university: string;
+  faculty: string;
+  program: string;
+  subject: string;
+  academic_level: 'Bachelor' | 'Masters';
+  system_type: 'Semester System' | 'Yearly System';
+  duration: number;
+}
+
+interface DocumentRow {
+  id: string;
+  title: string;
+  category: string;
+  semester: number;
+  file_url: string | null;
+  slug: string | null;
+}
 
 export default function AdminUploadPage() {
   const router = useRouter();
   const [checkedAuth, setCheckedAuth] = useState(false);
-  const [structure, setStructure] = useState<StructureStore>({ universities: [] });
-  const [notes, setNotes] = useState<StoredNote[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const [structureRows, setStructureRows] = useState<StructureRow[]>([]);
+  const [notes, setNotes] = useState<DocumentRow[]>([]);
+
   const [formState, setFormState] = useState({
     title: '',
-    subject: 'Corporate Finance',
-    universityId: '',
-    facultyId: '',
-    programId: '',
-    semester: '',
-    fileName: '',
-    previewUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+    university: '',
+    faculty: '',
+    program: '',
+    semester: '1',
+    subject: '',
+    category: 'note' as 'note' | 'past_paper',
   });
 
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content: '<p>Write professional notes here...</p>',
+    immediatelyRender: false,
+    editorProps: {
+      attributes: {
+        class: 'min-h-[220px] rounded-md border px-3 py-2 focus:outline-none',
+      },
+    },
+  });
+
+  const slugify = (text: string) =>
+    text
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+
+  const BUCKET = 'Document';
+
   useEffect(() => {
-    if (!isAdminLoggedIn()) {
-      router.replace('/admin/login');
-      return;
-    }
-    setCheckedAuth(true);
+    let mounted = true;
+    const checkAuth = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (!session || !isAllowedAdminEmail(session.user.email ?? null)) {
+        router.replace('/admin/login');
+        return;
+      }
+      setCheckedAuth(true);
+    };
+    void checkAuth();
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   useEffect(() => {
     const loadData = async () => {
-      const [structureRes, notesRes] = await Promise.all([fetch('/api/structure'), fetch('/api/notes')]);
-      if (structureRes.ok) {
-        const structurePayload = (await structureRes.json()) as { structure: StructureStore };
-        setStructure(structurePayload.structure);
-        const firstUniversity = structurePayload.structure.universities[0];
-        const firstFaculty = firstUniversity?.faculties[0];
-        const firstProgram = firstFaculty?.programs[0];
-        setFormState((prev) => ({
-          ...prev,
-          universityId: firstUniversity?.id || '',
-          facultyId: firstFaculty?.id || '',
-          programId: firstProgram?.id || '',
-          semester: firstProgram?.semesters[0] || '',
-        }));
-      }
-      if (notesRes.ok) {
-        const notesPayload = (await notesRes.json()) as { notes: StoredNote[] };
-        setNotes(notesPayload.notes);
+      try {
+        const { data: structureData, error: structureError } = await supabase
+          .from('academic_structure')
+          .select('id, university, faculty, program, subject, academic_level, system_type, duration')
+          .order('created_at', { ascending: false });
+
+        if (structureError) throw structureError;
+
+        const rows = (structureData ?? []) as StructureRow[];
+        setStructureRows(rows);
+        const first = rows[0];
+        if (first) {
+          setFormState((prev) => ({
+            ...prev,
+            university: first.university,
+            faculty: first.faculty,
+            program: first.program,
+            subject: first.subject,
+            semester: '1',
+          }));
+        }
+
+        const { data } = await supabase
+          .from('documents')
+          .select('id, title, category, semester, file_url, slug')
+          .order('created_at', { ascending: false });
+        if (data) setNotes(data as DocumentRow[]);
+      } catch (err) {
+        console.error('Initial load error:', err);
+        setErrorMessage('Failed to load structure/documents from Supabase.');
       }
     };
 
-    if (checkedAuth) {
-      void loadData();
-    }
+    if (checkedAuth) loadData();
   }, [checkedAuth]);
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) return;
-    setFormState((prev) => ({ ...prev, fileName: selectedFile.name }));
+  const universities = useMemo(
+    () => [...new Set(structureRows.map((row) => row.university))],
+    [structureRows]
+  );
+  const faculties = useMemo(
+    () =>
+      [...new Set(structureRows.filter((row) => row.university === formState.university).map((row) => row.faculty))],
+    [structureRows, formState.university]
+  );
+  const programs = useMemo(
+    () =>
+      [
+        ...new Set(
+          structureRows
+            .filter((row) => row.university === formState.university && row.faculty === formState.faculty)
+            .map((row) => row.program)
+        ),
+      ],
+    [structureRows, formState.university, formState.faculty]
+  );
+  const subjects = useMemo(
+    () =>
+      [
+        ...new Set(
+          structureRows
+            .filter(
+              (row) =>
+                row.university === formState.university &&
+                row.faculty === formState.faculty &&
+                row.program === formState.program
+            )
+            .map((row) => row.subject)
+        ),
+      ],
+    [structureRows, formState.university, formState.faculty, formState.program]
+  );
+  const selectedProgramMeta = useMemo(
+    () =>
+      structureRows.find(
+        (row) =>
+          row.university === formState.university &&
+          row.faculty === formState.faculty &&
+          row.program === formState.program
+      ),
+    [structureRows, formState.university, formState.faculty, formState.program]
+  );
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    if (type === 'success') {
+      setSuccessMessage(message);
+      setErrorMessage('');
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } else {
+      setErrorMessage(message);
+      setSuccessMessage('');
+      setTimeout(() => setErrorMessage(''), 6000);
+    }
   };
 
-  const selectedUniversity = structure.universities.find((item) => item.id === formState.universityId);
-  const availableFaculties = selectedUniversity?.faculties || [];
-  const selectedFaculty = availableFaculties.find((item) => item.id === formState.facultyId);
-  const availablePrograms = selectedFaculty?.programs || [];
-  const selectedProgram = availablePrograms.find((item) => item.id === formState.programId);
-  const availableSemesters = selectedProgram?.semesters || [];
-
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    const uploadNote = async () => {
-      const response = await fetch('/api/notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: formState.title,
-          subject: formState.subject,
-          semester: formState.semester,
-          previewUrl: formState.previewUrl,
-          universityId: formState.universityId,
-          facultyId: formState.facultyId,
-          programId: formState.programId,
-        }),
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as { note: StoredNote };
-      setNotes((prev) => [payload.note, ...prev]);
-      setFormState((prev) => ({ ...prev, title: '', fileName: '' }));
-    };
-    void uploadNote();
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setSelectedFile(file);
   };
 
-  const handleLogout = () => {
-    setAdminLoggedIn(false);
+  const handleUniversityChange = (university: string) => {
+    const firstFaculty = [...new Set(structureRows.filter((row) => row.university === university).map((row) => row.faculty))][0] ?? '';
+    const firstProgram =
+      [...new Set(structureRows.filter((row) => row.university === university && row.faculty === firstFaculty).map((row) => row.program))][0] ?? '';
+    const firstSubject =
+      [...new Set(structureRows.filter((row) => row.university === university && row.faculty === firstFaculty && row.program === firstProgram).map((row) => row.subject))][0] ?? '';
+    setFormState((prev) => ({
+      ...prev,
+      university,
+      faculty: firstFaculty,
+      program: firstProgram,
+      subject: firstSubject,
+      semester: '1',
+    }));
+  };
+
+  const handleFacultyChange = (faculty: string) => {
+    const firstProgram =
+      [...new Set(structureRows.filter((row) => row.university === formState.university && row.faculty === faculty).map((row) => row.program))][0] ?? '';
+    const firstSubject =
+      [...new Set(structureRows.filter((row) => row.university === formState.university && row.faculty === faculty && row.program === firstProgram).map((row) => row.subject))][0] ?? '';
+    setFormState((prev) => ({
+      ...prev,
+      faculty,
+      program: firstProgram,
+      subject: firstSubject,
+      semester: '1',
+    }));
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    if (!formState.program) {
+      showToast('Program is still loading — please wait a moment and try again.', 'error');
+      return;
+    }
+    if (!formState.title.trim()) {
+      showToast('Please enter a title.', 'error');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      let publicUrl: string | null = null;
+      if (selectedFile) {
+        const fileExt = selectedFile.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from(BUCKET).upload(fileName, selectedFile);
+        if (uploadError) throw new Error(`Storage Error: ${uploadError.message}`);
+        const {
+          data: { publicUrl: uploadedPublicUrl },
+        } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
+        publicUrl = uploadedPublicUrl;
+      }
+
+      const { data: dbData, error: dbError } = await supabase
+        .from('documents')
+        .insert([
+          {
+            title: formState.title.trim(),
+            slug: `${slugify(formState.title)}-${Date.now()}`,
+            university: formState.university,
+            faculty: formState.faculty,
+            program: formState.program,
+            subject: formState.subject,
+            program_id: null,
+            semester: parseInt(formState.semester) || 1,
+            file_url: publicUrl,
+            category: formState.category,
+            uploaded_by: 'Admin',
+            content: editor?.getHTML() ?? '',
+            academic_level: selectedProgramMeta?.academic_level ?? 'Bachelor',
+            system_type: selectedProgramMeta?.system_type ?? 'Semester System',
+          },
+        ])
+        .select();
+
+      if (dbError) throw new Error(`Database Error: ${dbError.message}`);
+
+      if (dbData?.[0]) setNotes((prev) => [dbData[0] as DocumentRow, ...prev]);
+      setFormState((prev) => ({ ...prev, title: '' }));
+      editor?.commands.setContent('<p>Write professional notes here...</p>');
+      setSelectedFile(null);
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+
+      showToast('Document published to PadhnaJaam successfully!', 'success');
+    } catch (error: any) {
+      console.error('FULL ERROR LOG:', error);
+      showToast(`Upload failed: ${error.message}`, 'error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     router.replace('/admin/login');
   };
 
-  if (!checkedAuth) {
-    return <div className="min-h-screen bg-background" />;
-  }
+  if (!checkedAuth) return <div className="min-h-screen bg-background" />;
 
   return (
     <div className="flex min-h-screen bg-[#f7f8fb]">
+
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        {successMessage && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg bg-green-600 text-white text-sm font-medium min-w-[280px]">
+            <span>✅</span>
+            <span>{successMessage}</span>
+          </div>
+        )}
+        {errorMessage && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg bg-red-600 text-white text-sm font-medium min-w-[280px]">
+            <span>❌</span>
+            <span>{errorMessage}</span>
+          </div>
+        )}
+      </div>
+
       <AdminSidebar activeTab="upload" onLogout={handleLogout} />
       <main className="flex-1 px-4 py-8 sm:px-8 md:ml-0 mt-12 md:mt-0">
         <div className="mx-auto max-w-4xl">
-          <div className="flex items-center justify-between gap-3 mb-6">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Admin Upload Portal</h1>
-              <p className="text-sm text-muted-foreground">
-                Faculty and Program options now depend on the selected University.
-              </p>
-            </div>
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-bold">PadhnaJaam Cloud Upload</h1>
             <Link href="/admin/dashboard">
-              <Button variant="outline">Back to Admin</Button>
+              <Button variant="outline">Dashboard</Button>
             </Link>
           </div>
 
-          <section className="rounded-xl border border-border bg-white p-5 sm:p-6">
+          <section className="rounded-xl border bg-white p-6 shadow-sm">
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-1">Chapter Title</label>
+                <label className="block text-sm font-medium mb-1">Document Title</label>
                 <input
                   required
+                  className="w-full border rounded-md px-3 py-2"
                   value={formState.title}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, title: event.target.value }))}
-                  className="w-full border border-border rounded-md px-3 py-2"
-                  placeholder="Enter chapter title"
+                  onChange={(e) => setFormState((prev) => ({ ...prev, title: e.target.value }))}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Subject</label>
-                <input
-                  required
-                  value={formState.subject}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, subject: event.target.value }))}
-                  className="w-full border border-border rounded-md px-3 py-2"
-                  placeholder="Corporate Finance"
-                />
+                <label className="block text-sm font-medium mb-1">Category</label>
+                <select
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.category}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, category: e.target.value as any }))}
+                >
+                  <option value="note">Study Note</option>
+                  <option value="past_paper">Past Question</option>
+                </select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-1">University</label>
                 <select
-                  value={formState.universityId}
-                  onChange={(event) => {
-                    const university = structure.universities.find((item) => item.id === event.target.value);
-                    const faculty = university?.faculties[0];
-                    const program = faculty?.programs[0];
-                    setFormState((prev) => ({
-                      ...prev,
-                      universityId: event.target.value,
-                      facultyId: faculty?.id || '',
-                      programId: program?.id || '',
-                      semester: program?.semesters[0] || '',
-                    }));
-                  }}
-                  className="w-full border border-border rounded-md px-3 py-2"
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.university}
+                  onChange={(e) => handleUniversityChange(e.target.value)}
                 >
-                  {structure.universities.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
+                  {universities.map((university) => (
+                    <option key={university} value={university}>{university}</option>
                   ))}
                 </select>
               </div>
@@ -176,24 +367,12 @@ export default function AdminUploadPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Faculty</label>
                 <select
-                  value={formState.facultyId}
-                  onChange={(event) => {
-                    const faculty = availableFaculties.find((item) => item.id === event.target.value);
-                    const program = faculty?.programs[0];
-                    setFormState((prev) => ({
-                      ...prev,
-                      facultyId: event.target.value,
-                      programId: program?.id || '',
-                      semester: program?.semesters[0] || '',
-                    }));
-                  }}
-                  className="w-full border border-border rounded-md px-3 py-2"
-                  disabled={availableFaculties.length === 0}
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.faculty}
+                  onChange={(e) => handleFacultyChange(e.target.value)}
                 >
-                  {availableFaculties.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
+                  {faculties.map((faculty) => (
+                    <option key={faculty} value={faculty}>{faculty}</option>
                   ))}
                 </select>
               </div>
@@ -201,75 +380,103 @@ export default function AdminUploadPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Program</label>
                 <select
-                  value={formState.programId}
-                  onChange={(event) => {
-                    const program = availablePrograms.find((item) => item.id === event.target.value);
-                    setFormState((prev) => ({
-                      ...prev,
-                      programId: event.target.value,
-                      semester: program?.semesters[0] || '',
-                    }));
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.program}
+                  onChange={(e) => {
+                    const selectedProgram = e.target.value;
+                    const firstSubject =
+                      [...new Set(structureRows.filter((row) => row.university === formState.university && row.faculty === formState.faculty && row.program === selectedProgram).map((row) => row.subject))][0] ?? '';
+                    setFormState((prev) => ({ ...prev, program: selectedProgram, subject: firstSubject }));
                   }}
-                  className="w-full border border-border rounded-md px-3 py-2"
-                  disabled={availablePrograms.length === 0}
                 >
-                  {availablePrograms.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
+                  {programs.map((program) => (
+                    <option key={program} value={program}>{program}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Semester / Year</label>
+                <select
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.semester}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, semester: e.target.value }))}
+                >
+                  {Array.from({ length: selectedProgramMeta?.duration || 8 }, (_, index) => index + 1).map((s) => (
+                    <option key={s} value={s.toString()}>
+                      {selectedProgramMeta?.system_type === 'Yearly System' ? `Year ${s}` : `Semester ${s}`}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Semester</label>
+                <label className="block text-sm font-medium mb-1">Subject</label>
                 <select
-                  value={formState.semester}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, semester: event.target.value }))}
-                  className="w-full border border-border rounded-md px-3 py-2"
-                  disabled={availableSemesters.length === 0}
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.subject}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, subject: e.target.value }))}
                 >
-                  {availableSemesters.map((item) => (
-                    <option key={item}>{item}</option>
+                  {subjects.map((subject) => (
+                    <option key={subject} value={subject}>{subject}</option>
                   ))}
                 </select>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-1">PDF File</label>
+                <label className="block text-sm font-medium mb-1">Professional Notes Content</label>
+                <EditorContent editor={editor} />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">Optional PDF (Download Version)</label>
                 <input
                   type="file"
                   accept="application/pdf"
                   onChange={handleFileChange}
-                  className="w-full border border-border rounded-md px-3 py-2 file:mr-3 file:px-3 file:py-1 file:rounded-md file:border-0 file:bg-secondary file:text-secondary-foreground"
+                  className="w-full border rounded-md p-2"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <Button className="bg-secondary hover:bg-secondary/90 text-secondary-foreground">
-                  Save Note to JSON
+                <Button
+                  type="submit"
+                  disabled={isUploading || !formState.program}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                >
+                  {isUploading ? 'Uploading to Cloud...' : 'Publish to PadhnaJaam'}
                 </Button>
               </div>
+
             </form>
           </section>
 
-          <section className="rounded-xl border border-border bg-white p-5 sm:p-6 mt-6">
-            <h2 className="text-lg font-semibold">Notes Saved</h2>
-            <div className="mt-3 space-y-3">
-              {notes.length === 0 && (
-                <p className="text-sm text-muted-foreground">No notes yet. Submit the form above.</p>
-              )}
-              {notes.map((item) => (
-                <div key={item.id} className="rounded-md border border-border p-3">
-                  <p className="font-medium text-foreground">{item.title}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {item.subject} | {item.semester} semester
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">{item.previewUrl}</p>
+          <section className="mt-8">
+            <h2 className="text-lg font-semibold mb-4">Live on Database</h2>
+            <div className="grid gap-3">
+              {notes.map((note) => (
+                <div key={note.id} className="p-4 bg-white border rounded-lg flex justify-between items-center shadow-sm">
+                  <div>
+                    <p className="font-bold text-gray-800">{note.title}</p>
+                    <p className="text-xs text-gray-500 uppercase">{note.category} | Semester {note.semester}</p>
+                  </div>
+                  <div className="flex gap-3 text-sm">
+                    {note.slug && (
+                      <Link href={`/notes/${note.slug}`} className="text-blue-600 font-medium hover:underline">
+                        View Note
+                      </Link>
+                    )}
+                    {note.file_url && (
+                      <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-medium hover:underline">
+                        PDF
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </section>
+
         </div>
       </main>
     </div>

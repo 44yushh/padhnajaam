@@ -1,12 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CircleUserRound, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/lib/supabase';
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [avatarLabel, setAvatarLabel] = useState('U');
 
   const navItems = [
     { label: 'Notes', href: '/' },
@@ -15,6 +18,29 @@ export default function Navbar() {
     { label: 'About', href: '/about' },
     { label: 'Contact', href: '/contact' },
   ];
+
+  useEffect(() => {
+    const loadSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const hasSession = Boolean(session?.user);
+      setIsLoggedIn(hasSession);
+      if (session?.user?.email) {
+        setAvatarLabel(session.user.email.charAt(0).toUpperCase());
+      }
+    };
+    void loadSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const hasSession = Boolean(session?.user);
+      setIsLoggedIn(hasSession);
+      setAvatarLabel(session?.user?.email?.charAt(0).toUpperCase() ?? 'U');
+    });
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background">
@@ -43,16 +69,27 @@ export default function Navbar() {
 
           {/* Desktop Auth Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            <Link href="/auth">
-              <Button variant="outline" className="border-border text-foreground">
-                Sign In
-              </Button>
-            </Link>
-            <Link href="/auth">
-              <Button className="bg-secondary hover:bg-secondary/90 text-secondary-foreground">
-                Sign Up
-              </Button>
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/auth" aria-label="User account" className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 hover:bg-muted">
+                <CircleUserRound className="h-5 w-5 text-foreground" />
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
+                  {avatarLabel}
+                </span>
+              </Link>
+            ) : (
+              <>
+                <Link href="/auth">
+                  <Button variant="outline" className="border-border text-foreground">
+                    Sign In
+                  </Button>
+                </Link>
+                <Link href="/auth">
+                  <Button className="bg-secondary hover:bg-secondary/90 text-secondary-foreground">
+                    Sign Up
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -84,16 +121,26 @@ export default function Navbar() {
                 </Link>
               ))}
               <div className="flex flex-col gap-2 pt-4 border-t border-border">
-                <Link href="/auth" onClick={() => setIsOpen(false)}>
-                  <Button variant="outline" className="w-full border-border text-foreground">
-                    Sign In
-                  </Button>
-                </Link>
-                <Link href="/auth" onClick={() => setIsOpen(false)}>
-                  <Button className="w-full bg-secondary hover:bg-secondary/90 text-secondary-foreground">
-                    Sign Up
-                  </Button>
-                </Link>
+                {isLoggedIn ? (
+                  <Link href="/auth" onClick={() => setIsOpen(false)}>
+                    <Button variant="outline" className="w-full border-border text-foreground">
+                      Account
+                    </Button>
+                  </Link>
+                ) : (
+                  <>
+                    <Link href="/auth" onClick={() => setIsOpen(false)}>
+                      <Button variant="outline" className="w-full border-border text-foreground">
+                        Sign In
+                      </Button>
+                    </Link>
+                    <Link href="/auth" onClick={() => setIsOpen(false)}>
+                      <Button className="w-full bg-secondary hover:bg-secondary/90 text-secondary-foreground">
+                        Sign Up
+                      </Button>
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           </div>

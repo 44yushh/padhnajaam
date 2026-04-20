@@ -1,12 +1,12 @@
 'use client';
 
-import { useMemo, useRef, useState, Suspense } from 'react';
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
-import { notes } from '@/lib/data';
 import { Button } from '@/components/ui/button';
 import { Expand, Lock, BookOpen } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 const DEFAULT_PDF_URL = 'https://mozilla.github.io/pdf.js/web/compressed.tracemonkey-pldi-09.pdf';
 
@@ -15,16 +15,19 @@ function DocumentContent() {
   const searchParams = useSearchParams();
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const [hasJoined, setHasJoined] = useState(false);
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [title, setTitle] = useState('Selected PDF');
 
-  const noteId = searchParams.get('noteId');
-  const requestedFileIndex = Number(searchParams.get('fileIndex') || 0);
+  const slug = searchParams.get('slug');
 
-  const selected = useMemo(() => {
-    const note = notes.find((item) => item.id === noteId) || notes[0];
-    const pdfFiles = note.files.filter((file) => file.type === 'pdf');
-    const file = pdfFiles[requestedFileIndex] || pdfFiles[0];
-    return { note, file };
-  }, [noteId, requestedFileIndex]);
+  useEffect(() => {
+    if (!slug) return;
+    void (async () => {
+      const { data } = await supabase.from('documents').select('title, file_url').eq('slug', slug).single();
+      setFileUrl(data?.file_url ?? null);
+      setTitle(data?.title ?? 'Selected PDF');
+    })();
+  }, [slug]);
 
   const chapters = useMemo(
     () => [
@@ -36,7 +39,7 @@ function DocumentContent() {
     [hasJoined]
   );
 
-  const pdfUrl = selected.file?.url && selected.file.url !== '#' ? selected.file.url : DEFAULT_PDF_URL;
+  const pdfUrl = fileUrl || DEFAULT_PDF_URL;
 
   const handleFullscreen = async () => {
     if (!viewerRef.current) return;
@@ -50,7 +53,7 @@ function DocumentContent() {
   return (
     <main className="min-h-screen bg-muted/20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">{selected.note.title}</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">{title}</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Document View mode active. First 2 pages are open for all students.
         </p>
@@ -83,7 +86,7 @@ function DocumentContent() {
           <section className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm text-muted-foreground">
-                {selected.file?.name || 'Selected PDF'} {hasJoined ? '(Full Access)' : '(Preview: 2 Pages)'}
+                {title} {hasJoined ? '(Full Access)' : '(Preview: 2 Pages)'}
               </p>
               <Button
                 onClick={handleFullscreen}

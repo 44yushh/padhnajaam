@@ -58,19 +58,19 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <a href="#" className="text-sm text-muted-foreground hover:text-secondary transition-colors">
+                <Link href="/privacy" className="text-sm text-muted-foreground hover:text-secondary transition-colors">
                   Privacy Policy
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#" className="text-sm text-muted-foreground hover:text-secondary transition-colors">
+                <Link href="/terms" className="text-sm text-muted-foreground hover:text-secondary transition-colors">
                   Terms of Service
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#" className="text-sm text-muted-foreground hover:text-secondary transition-colors">
-                  FAQ
-                </a>
+                <Link href="/deletion" className="text-sm text-muted-foreground hover:text-secondary transition-colors">
+                  Data Deletion
+                </Link>
               </li>
             </ul>
           </div>
@@ -81,10 +81,10 @@ export default function Footer() {
             <div className="flex items-center gap-2">
               <Mail className="w-4 h-4 text-secondary" />
               <a
-                href="mailto:contact@padhnaJaam.com"
+                href="mailto:aayushhhsahh@gmail.com"
                 className="text-sm text-muted-foreground hover:text-secondary transition-colors"
               >
-                contact@padhnaJaam.com
+                aayushhhsahh@gmail.com
               </a>
             </div>
           </div>

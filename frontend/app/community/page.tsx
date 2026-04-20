@@ -1,12 +1,38 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
 import { Button } from '@/components/ui/button';
 import { ThumbsUp, MessageSquare } from 'lucide-react';
-import { communityPosts } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
+
+interface CommunityPost {
+  id: string;
+  author: string;
+  title: string;
+  content: string;
+  type: 'discussion' | 'resource' | 'question';
+  upvotes: number;
+  replies: number;
+  created_at: string;
+}
 
 export default function CommunityPage() {
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>([]);
+
+  useEffect(() => {
+    const loadPosts = async () => {
+      const { data } = await supabase
+        .from('community_posts')
+        .select('id, author, title, content, type, upvotes, replies, created_at')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      setCommunityPosts((data ?? []) as CommunityPost[]);
+    };
+    void loadPosts();
+  }, []);
+
   return (
     <>
       <Navbar />
@@ -58,7 +84,7 @@ export default function CommunityPage() {
                         <div>
                           <h3 className="font-semibold text-foreground">{post.author}</h3>
                           <p className="text-xs text-muted-foreground">
-                            {new Date(post.uploadedAt).toLocaleDateString()}
+                            {new Date(post.created_at).toLocaleDateString()}
                           </p>
                         </div>
                         <span
@@ -92,6 +118,11 @@ export default function CommunityPage() {
                   </div>
                 </div>
               ))}
+              {communityPosts.length === 0 && (
+                <div className="border border-border rounded-lg p-6 bg-card text-sm text-muted-foreground">
+                  No community posts yet.
+                </div>
+              )}
             </div>
           </div>
         </section>
